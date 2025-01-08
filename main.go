@@ -7,9 +7,11 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -50,7 +52,7 @@ var (
 	mainnetRPC      = "http://api.testnet.solana.com"
 	config          = Config{
 		WorkerCount:      100,
-		MinDownloadSpeed: 100.0, // Minimum 5 MB/s
+		MinDownloadSpeed: 50.0,  // Minimum 5 MB/s
 		MaxLatency:       200.0, // Maximum 200 ms
 		SleepBeforeRetry: 5,
 		DefaultSlot:      0,
@@ -193,7 +195,26 @@ func redirectSnapshot(c *gin.Context, snapshotType string) {
 	// Construct the URL for the snapshot
 	snapshotURL := fmt.Sprintf("%s/%s", bestRPC, snapshotType)
 
-	// Redirect the client
+	// Perform a HEAD request to get the final filename from the upstream node
+	resp, err := http.Head(snapshotURL)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		log.Printf("Error getting snapshot HEAD from %s: %v", snapshotURL, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch snapshot HEAD from %s", bestRPC)})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Extract the file name from the upstream response
+	fileName := filepath.Base(snapshotURL) // Default to the base of the URL
+	if contentDisposition := resp.Header.Get("Content-Disposition"); contentDisposition != "" {
+		_, params, err := mime.ParseMediaType(contentDisposition)
+		if err == nil && params["filename"] != "" {
+			fileName = params["filename"]
+		}
+	}
+
+	// Redirect the client with Content-Disposition header
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
 	c.Redirect(http.StatusFound, snapshotURL)
 }
 
