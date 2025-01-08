@@ -74,10 +74,10 @@ func main() {
 
 	// Routes
 	r.GET("/snapshot.tar.bz2", func(c *gin.Context) {
-		handleSnapshotRequest(c, "snapshot.tar.bz2")
+		redirectSnapshot(c, "snapshot.tar.bz2")
 	})
 	r.GET("/incremental-snapshot.tar.bz2", func(c *gin.Context) {
-		handleSnapshotRequest(c, "incremental-snapshot.tar.bz2")
+		redirectSnapshot(c, "incremental-snapshot.tar.bz2")
 	})
 	r.GET("/nodes", listNodes)
 	r.GET("/status", getStatus)
@@ -172,6 +172,29 @@ func loadCacheFromFile() error {
 
 	log.Printf("Loaded %d nodes from cache file.", len(cachedNodes))
 	return nil
+}
+
+func redirectSnapshot(c *gin.Context, snapshotType string) {
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+
+	if len(cachedNodes) == 0 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No available nodes. Cache is empty."})
+		return
+	}
+
+	// Select the best RPC node
+	bestRPC := selectBestRPC(cachedNodes)
+	if bestRPC == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No good nodes found."})
+		return
+	}
+
+	// Construct the URL for the snapshot
+	snapshotURL := fmt.Sprintf("%s/%s", bestRPC, snapshotType)
+
+	// Redirect the client
+	c.Redirect(http.StatusFound, snapshotURL)
 }
 
 // filterGoodNodes filters out nodes that are not marked as "good".
